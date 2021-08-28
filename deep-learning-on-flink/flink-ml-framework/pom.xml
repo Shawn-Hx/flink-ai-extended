@@ -281,6 +281,9 @@
                                 <exec executable="${python.interpreter}" dir="${basedir}" failonerror="true">
                                     <arg line="-m grpc_tools.protoc -I=src/proto --python_out=python/flink_ml_framework/ src/proto/node.proto"/>
                                 </exec>
+                                <exec executable="${python.interpreter}" dir="${basedir}" failonerror="true">
+                                    <arg line="-m grpc_tools.protoc -I=src/proto --python_out=python/flink_ml_framework/ src/proto/checkpoint.proto"/>
+                                </exec>
                             </target>
                         </configuration>
                     </execution>
@@ -294,6 +297,9 @@
                             <target>
                                 <exec executable="${python.interpreter}" dir="${basedir}" failonerror="true">
                                     <arg line="-m grpc_tools.protoc -I=src/proto --python_out=python/flink_ml_framework/ --grpc_python_out=python/flink_ml_framework/ src/proto/node_service.proto"/>
+                                </exec>
+                                <exec executable="${python.interpreter}" dir="${basedir}" failonerror="true">
+                                    <arg line="-m grpc_tools.protoc -I=src/proto --python_out=python/flink_ml_framework/ --grpc_python_out=python/flink_ml_framework/ src/proto/checkpoint_service.proto"/>
                                 </exec>
                             </target>
                         </configuration>

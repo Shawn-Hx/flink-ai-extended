@@ -19,6 +19,11 @@ public class TFConfig extends TFConfigBase {
 		super(workerNum, psNum, properties, pythonFiles, funName, envPath);
 	}
 
+	public TFConfig(int workerNum, int psNum, Map<String, String> properties, String pythonFiles, String funName,
+					String saveFunName, String envPath) {
+		super(workerNum, psNum, properties, pythonFiles, funName, saveFunName, envPath);
+	}
+
 	@Override
 	public FlatMapFunction getInferenceFlatMapFunction(BaseRole role, MLConfig mlConfig, TypeInformation inTypeInfo, TypeInformation outTypeInfo) {
 		return new TFJavaInferenceFlatMap(role, mlConfig, inTypeInfo, outTypeInfo);

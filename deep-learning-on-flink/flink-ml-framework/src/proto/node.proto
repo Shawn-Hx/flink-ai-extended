@@ -80,13 +80,16 @@ message ContextProto {
     string userScript = 7;
     string identity = 8;
     string funcName = 9;
-    int32 failNum = 10;
+    string saveFuncName = 10;
+    int32 checkpointServerPort=11;
+    string checkpointMessage=12;
+    int32 failNum = 13;
     //used for ipc queue
-    string outQueueName = 11;
-    string inQueueName = 12;
-    int64  outQueueMMapLen = 13;
-    int64  inQueueMMapLen = 14;
-    repeated ColumnInfoPB columnInfos = 15;
+    string outQueueName = 14;
+    string inQueueName = 15;
+    int64  outQueueMMapLen = 16;
+    int64  inQueueMMapLen = 17;
+    repeated ColumnInfoPB columnInfos = 18;
 }
 
 message ContextRequest {

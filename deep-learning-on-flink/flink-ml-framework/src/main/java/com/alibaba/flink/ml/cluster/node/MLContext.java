@@ -26,7 +26,6 @@ import com.alibaba.flink.ml.util.MLConstants;
 import com.alibaba.flink.ml.util.MLException;
 import com.alibaba.flink.ml.util.SpscOffHeapQueue;
 import com.alibaba.flink.ml.util.SysUtil;
-import com.google.common.base.Preconditions;
 import com.google.common.io.Files;
 import org.apache.commons.io.FileUtils;
 import org.slf4j.Logger;
@@ -59,6 +58,9 @@ public class MLContext implements Serializable, Closeable {
 	private Path pythonDir;
 	private String[] pythonFiles;
 	private String funcName;
+	private String saveFuncName;
+	private int checkpointServerPort;
+	private String checkpointMessage;
 	private String roleName;
 	private int index;
 	private ContextProto contextProto;
@@ -124,6 +126,7 @@ public class MLContext implements Serializable, Closeable {
 	 * @param index node index.
 	 * @param roleParallelismMap cluster role parallelism information.
 	 * @param funcName machine learning script main function name.
+	 * @param saveFuncName machine learning script snapshot state function name.
 	 * @param properties context properties.
 	 * @param envPath python virtual env address.
 	 * @param inputColumns input information.
@@ -131,10 +134,12 @@ public class MLContext implements Serializable, Closeable {
 	 * @param outputQueueFile output memory queue file.
 	 * @throws MLException
 	 */
-	private MLContext(ExecutionMode mode, String roleName, int index, Map<String, Integer> roleParallelismMap, String funcName,
-			Map<String, String> properties, String envPath, Map<String, String> inputColumns,
-			File inputQueueFile, File outputQueueFile) throws MLException {
+	private MLContext(ExecutionMode mode, String roleName, int index, Map<String, Integer> roleParallelismMap,
+					  String funcName, String saveFuncName, Map<String, String> properties, String envPath,
+					  Map<String, String> inputColumns, File inputQueueFile, File outputQueueFile)
+			throws MLException {
 		this.funcName = funcName;
+		this.saveFuncName = saveFuncName;
 		this.roleName = roleName;
 		this.index = index;
 		this.roleParallelismMap = roleParallelismMap;
@@ -170,7 +175,7 @@ public class MLContext implements Serializable, Closeable {
 	 */
 	public MLContext(ExecutionMode mode, MLConfig mlConfig, String roleName, int index, String envPath,
 			Map<String, String> inputColumns) throws MLException {
-		this(mode, roleName, index, mlConfig.getRoleParallelismMap(), mlConfig.getFuncName(),
+		this(mode, roleName, index, mlConfig.getRoleParallelismMap(), mlConfig.getFuncName(), mlConfig.getSaveFuncName(),
 				mlConfig.getProperties(), envPath, inputColumns);
 	}
 
@@ -182,14 +187,17 @@ public class MLContext implements Serializable, Closeable {
 	 * @param index node index.
 	 * @param roleParallelismMap cluster role parallelism information.
 	 * @param funcName machine learning script main function name.
+	 * @param saveFuncName machine learning script snapshot state function name.
 	 * @param properties context properties.
 	 * @param envPath python virtual env address.
 	 * @param inputColumns input information.
 	 * @throws MLException
 	 */
-	public MLContext(ExecutionMode mode, String roleName, int index, Map<String, Integer> roleParallelismMap, String funcName,
-			Map<String, String> properties, String envPath, Map<String, String> inputColumns) throws MLException {
+	public MLContext(ExecutionMode mode, String roleName, int index, Map<String, Integer> roleParallelismMap,
+					 String funcName, String saveFuncName, Map<String, String> properties,
+					 String envPath, Map<String, String> inputColumns) throws MLException {
 		this.funcName = funcName;
+		this.saveFuncName = saveFuncName;
 		this.roleName = roleName;
 		this.index = index;
 		this.roleParallelismMap = roleParallelismMap;
@@ -324,6 +332,10 @@ public class MLContext implements Serializable, Closeable {
 		this.funcName = funcName;
 	}
 
+	public void setSaveFuncName(String saveFuncName) {
+		this.saveFuncName = saveFuncName;
+	}
+
 	public SpscOffHeapQueue getInputQueue() {
 		return inputQueue;
 	}
@@ -343,6 +355,26 @@ public class MLContext implements Serializable, Closeable {
 
 	public String getFuncName() {
 		return funcName;
+	}
+
+	public String getSaveFuncName() {
+		return saveFuncName;
+	}
+
+	public int getCheckpointServerPort() {
+		return checkpointServerPort;
+	}
+
+	public void setCheckpointServerPort(int checkpointServerPort) {
+		this.checkpointServerPort = checkpointServerPort;
+	}
+
+	public String getCheckpointMessage() {
+		return checkpointMessage;
+	}
+
+	public void setCheckpointMessage(String checkpointMessage) {
+		this.checkpointMessage = checkpointMessage;
 	}
 
 	@Override
@@ -449,6 +481,7 @@ public class MLContext implements Serializable, Closeable {
 		int index = pb.getIndex();
 		Map<String, Integer> jobNumMap = pb.getRoleParallelismMap();
 		String funcName = pb.getFuncName();
+		String saveFuncName = pb.getSaveFuncName();
 		// Map<String, String> props = pb.getPropsMap();
 		Map<String, String> props = new HashMap<>();
 		props.putAll(pb.getPropsMap());
@@ -464,8 +497,8 @@ public class MLContext implements Serializable, Closeable {
 		File inQueueFile = new File(pb.getInQueueName());
 		File outQueueFile = new File(pb.getOutQueueName());
 		// no need to specify QueueMMapLen since it'll be computed based on the queue size
-		return new MLContext(mode, roleName, index, jobNumMap, funcName, props,
-				null, inputCols, inQueueFile, outQueueFile);
+		return new MLContext(mode, roleName, index, jobNumMap, funcName, saveFuncName, props, null, inputCols,
+				inQueueFile, outQueueFile);
 	}
 
 	/**
@@ -485,7 +518,12 @@ public class MLContext implements Serializable, Closeable {
 		ContextProto.Builder builder = ContextProto.newBuilder();
 		builder.setMode(getMode()).setFailNum(getFailNum()).setRoleName(getRoleName());
 		String funcName = getFuncName() == null ? "" : getFuncName();
-		builder.setIndex(getIndex()).setFuncName(funcName).setIdentity(getIdentity());
+		String saveFuncName = getSaveFuncName() == null ? "" : getSaveFuncName();
+		builder.setIndex(getIndex()).setFuncName(funcName).setSaveFuncName(saveFuncName)
+				.setCheckpointServerPort(checkpointServerPort).setIdentity(getIdentity());
+		if (checkpointMessage != null) {
+			builder.setCheckpointMessage(checkpointMessage);
+		}
 		if (outputQueueFile != null) {
 			builder.setOutQueueMMapLen(inputQueue.getMmapLen());
 			builder.setOutQueueName(inputQueueFile.getAbsolutePath());

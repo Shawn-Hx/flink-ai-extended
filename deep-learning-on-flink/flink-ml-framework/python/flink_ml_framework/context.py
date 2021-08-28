@@ -36,6 +36,12 @@ class Context(object):
         self.userScript = context.userScript
         self.identity = context.identity
         self.funcName = context.funcName
+        self.saveFuncName = context.saveFuncName
+        self.checkpointServerPort = context.checkpointServerPort
+        if context.checkpointMessage == '':
+            self.checkpointMessage = None
+        else:
+            self.checkpointMessage = context.checkpointMessage
         self.failNum = context.failNum
 
         self.outQueueName = context.outQueueName

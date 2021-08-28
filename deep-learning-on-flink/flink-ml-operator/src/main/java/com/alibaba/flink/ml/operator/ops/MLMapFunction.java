@@ -21,13 +21,23 @@ package com.alibaba.flink.ml.operator.ops;
 import com.alibaba.flink.ml.cluster.ExecutionMode;
 import com.alibaba.flink.ml.cluster.MLConfig;
 import com.alibaba.flink.ml.cluster.node.MLContext;
+import com.alibaba.flink.ml.cluster.rpc.CheckpointClient;
 import com.alibaba.flink.ml.cluster.rpc.NodeServer;
 import com.alibaba.flink.ml.data.DataExchange;
+import com.alibaba.flink.ml.operator.util.PythonException;
 import com.alibaba.flink.ml.operator.util.PythonFileUtil;
 import com.alibaba.flink.ml.cluster.role.BaseRole;
 
+import com.alibaba.flink.ml.operator.util.PythonRuntimeException;
+import com.alibaba.flink.ml.proto.CheckpointResponse;
+import com.alibaba.flink.ml.util.IpHostUtil;
 import org.apache.flink.api.common.functions.RuntimeContext;
+import org.apache.flink.api.common.state.ListState;
+import org.apache.flink.api.common.state.ListStateDescriptor;
+import org.apache.flink.api.common.typeinfo.TypeHint;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.runtime.state.FunctionInitializationContext;
+import org.apache.flink.runtime.state.FunctionSnapshotContext;
 import org.apache.flink.util.Collector;
 
 import org.slf4j.Logger;
@@ -37,6 +47,8 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.io.Serializable;
+import java.time.Duration;
+import java.util.Iterator;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 
@@ -46,6 +58,8 @@ import java.util.concurrent.FutureTask;
  * @param <OUT> machine learning node output class.
  */
 public class MLMapFunction<IN, OUT> implements Closeable, Serializable {
+	private static final Duration WAIT_INTERVAL = Duration.ofSeconds(30);
+
 	private BaseRole role;
 	private MLConfig config;
 	private TypeInformation<IN> inTI;
@@ -53,8 +67,10 @@ public class MLMapFunction<IN, OUT> implements Closeable, Serializable {
 	private MLContext mlContext;
 	private FutureTask<Void> serverFuture;
 	private ExecutionMode mode;
+	private CheckpointClient checkpointClient;
 	private transient DataExchange<IN, OUT> dataExchange;
 	private volatile Collector<OUT> collector = null;
+	private transient ListState<String> checkpointMessage;
 
 	private static final Logger LOG = LoggerFactory.getLogger(MLMapFunction.class);
 
@@ -67,6 +83,10 @@ public class MLMapFunction<IN, OUT> implements Closeable, Serializable {
 		this.inTI = inTI;
 	}
 
+	private boolean isCoordinator(int index) {
+		return role.name().equals("chief") || role.name().equals("worker") && index == 0;
+	}
+
 	/**
 	 * create machine learning node and data exchange object.
 	 * @param runtimeContext flink operator RuntimeContext.
@@ -74,8 +94,26 @@ public class MLMapFunction<IN, OUT> implements Closeable, Serializable {
 	 */
 	public void open(RuntimeContext runtimeContext) throws Exception {
 		ResourcesUtils.parseGpuInfo(runtimeContext, config);
-		mlContext = new MLContext(mode, config, role.name(), runtimeContext.getIndexOfThisSubtask(),
-				config.getEnvPath(), null);
+
+		int index = runtimeContext.getIndexOfThisSubtask();
+		mlContext = new MLContext(mode, config, role.name(), index, config.getEnvPath(), null);
+
+		boolean startCheckpointServer = config.getSaveFuncName() != null && isCoordinator(index);
+		if (startCheckpointServer) {
+			// choose a free port to start python checkpoint grpc server
+			int port = IpHostUtil.getFreePort();
+			mlContext.setCheckpointServerPort(port);
+		}
+
+		Iterator<String> iterator = checkpointMessage.get().iterator();
+		if (iterator.hasNext()) {
+			mlContext.setCheckpointMessage(iterator.next());
+		}
+		if (!isCoordinator(index)) {
+			// maintain the checkpoint message state on chief/worker-0 node
+			checkpointMessage.clear();
+		}
+
 		PythonFileUtil.preparePythonFilesForExec(runtimeContext, mlContext);
 
 		dataExchange = new DataExchange<>(mlContext);
@@ -91,6 +129,25 @@ public class MLMapFunction<IN, OUT> implements Closeable, Serializable {
 			throw new IOException(e.getMessage());
 		}
 		System.out.println("start:" + mlContext.getRoleName() + " index:" + mlContext.getIndex());
+
+		if (startCheckpointServer) {
+			String host = IpHostUtil.getIpAddress();
+			int port = mlContext.getCheckpointServerPort();
+			checkpointClient = new CheckpointClient(host, port);
+			try {
+				if (checkpointClient.waitForReady(WAIT_INTERVAL)) {
+					LOG.info("Connect to python checkpoint server {}:{}. on {}",
+							host, port, mlContext.getIdentity());
+				} else {
+					throw new PythonException(
+							String.format("Cannot connect to python checkpoint server %s:%d", host, port));
+				}
+			} catch (InterruptedException e) {
+			    checkpointClient.close();
+				LOG.error("Fail to connect to python checkpoint server", e);
+				throw e;
+			}
+		}
 	}
 
 	/**
@@ -100,6 +157,9 @@ public class MLMapFunction<IN, OUT> implements Closeable, Serializable {
 	public void close() {
 		if (mlContext != null && mlContext.getOutputQueue() != null) {
 			mlContext.getOutputQueue().markFinished();
+		}
+		if (checkpointClient != null) {
+			checkpointClient.close();
 		}
 
 		// wait for tf thread finish
@@ -171,6 +231,31 @@ public class MLMapFunction<IN, OUT> implements Closeable, Serializable {
 			} catch (IOException e) {
 				LOG.error("Fail to read data from python.", e);
 			}
+		}
+	}
+
+	void snapshotState(FunctionSnapshotContext snapshotContext) throws Exception {
+		if (checkpointClient != null) {
+			long checkpointId = snapshotContext.getCheckpointId();
+			CheckpointResponse response = checkpointClient.snapshotState(checkpointId);
+			if (response.getCode() == 0) {
+			    checkpointMessage.clear();
+			    checkpointMessage.add(response.getMessage());
+			} else {
+			    LOG.error("Exception in python for checkpoint-{}: {}", checkpointId, response.getMessage());
+				throw new PythonRuntimeException(response.getMessage());
+			}
+		}
+	}
+
+	void initializeState(FunctionInitializationContext initializationContext) throws Exception {
+		ListStateDescriptor<String> descriptor = new ListStateDescriptor<>(
+				"checkpoint-message",
+				TypeInformation.of(new TypeHint<String>() {}));
+		// insure each user script process can get the same checkpoint message
+		checkpointMessage = initializationContext.getOperatorStateStore().getUnionListState(descriptor);
+		if (initializationContext.isRestored()) {
+		    LOG.info("restore checkpoint message state");
 		}
 	}
 }

@@ -20,10 +20,13 @@ import threading
 import ctypes
 import logging
 import traceback
-from flink_ml_framework import context
 import grpc
+from concurrent import futures
+from flink_ml_framework import context
 from flink_ml_framework import node_pb2
 from flink_ml_framework import node_service_pb2_grpc
+from flink_ml_framework import checkpoint_pb2
+from flink_ml_framework import checkpoint_service_pb2_grpc
 
 
 def parse_dir_script(script_path):
@@ -78,6 +81,31 @@ def createContext(node_address):
     return context.Context(context_proto, channel)
 
 
+class CheckpointService(checkpoint_service_pb2_grpc.CheckpointServiceServicer):
+    def __init__(self, save_func):
+        self.save_func = save_func
+
+    def SnapshotState(self, request, context):
+        checkpoint_id = request.checkpointId
+        code = 0
+        try:
+            message = self.save_func(checkpoint_id)
+        except Exception as e:
+            code = -1
+            message = str(e)
+        return checkpoint_pb2.CheckpointResponse(code=code, message=message)
+
+
+def setup_checkpoint_service(port, save_func):
+    checkpoint_service_server = grpc.server(futures.ThreadPoolExecutor())
+    service = CheckpointService(save_func)
+    checkpoint_service_pb2_grpc.add_CheckpointServiceServicer_to_server(service, checkpoint_service_server)
+    checkpoint_service_server.add_insecure_port(f'[::]:{port}')
+    checkpoint_service_server.start()
+    logging.info(f'start checkpoint grpc server on port {port}\n')
+    return checkpoint_service_server
+
+
 if __name__ == "__main__":
     assert len(sys.argv) == 2, 'Invalid cmd line argument ' + str(sys.argv)
 
@@ -98,10 +126,23 @@ if __name__ == "__main__":
     script_str = context.userScript
     key = context.identity
     func_name = context.funcName
+    save_func_name = context.saveFuncName
     dir_name = parse_dir_script(script_str)
     sys.path.insert(0, dir_name[0])
     user_py = importlib.import_module(dir_name[1])
     func = getattr(user_py, func_name)
+
+    port = context.checkpointServerPort
+    server = None
+    if port > 0:
+        assert save_func_name is not None
+        save_func = getattr(user_py, save_func_name)
+        server = setup_checkpoint_service(port, save_func)
+        sys.stdout.flush()
+
     logging.info(key + ' calling user func ' + func_name)
     func(context)
     logging.info(key + " python run finish")
+
+    if server is not None:
+        server.stop(None)

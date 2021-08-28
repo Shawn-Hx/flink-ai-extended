@@ -39,13 +39,20 @@ public class MLConfig implements Serializable {
 	private final String envPath;
 	private String[] pythonFiles;
 	private String funcName;
+	private String saveFuncName;
 	private Map<String, Integer> roleParallelismMap;
 	private Map<String, String> properties;
 
 	public MLConfig(Map<String, Integer> roleParallelismMap, Map<String, String> properties, String pythonFile,
 			String funName, String envPath) {
 		this(roleParallelismMap, properties, StringUtils.isEmpty(pythonFile) ? null : new String[] { pythonFile },
-				funName, envPath);
+				funName, null, envPath);
+	}
+
+	public MLConfig(Map<String, Integer> roleParallelismMap, Map<String, String> properties, String[] pythonFile,
+					String funName, String envPath) {
+		this(roleParallelismMap, properties, pythonFile,
+				funName, null, envPath);
 	}
 
 	/**
@@ -55,10 +62,11 @@ public class MLConfig implements Serializable {
 	 * @param properties properties
 	 * @param pythonFiles the python files, the first one will be the entry python file
 	 * @param funName the entry function name in the first python file
+	 * @param saveFunName the entry function name for snapshot state
 	 * @param envPath virtual env package address
 	 */
 	public MLConfig(Map<String, Integer> roleParallelismMap, Map<String, String> properties, String[] pythonFiles,
-			String funName, String envPath) {
+			String funName, String saveFunName, String envPath) {
 		for (Integer i : roleParallelismMap.values()) {
 			Preconditions.checkArgument(i >= 0);
 		}
@@ -66,6 +74,7 @@ public class MLConfig implements Serializable {
 		this.properties = properties;
 		this.pythonFiles = pythonFiles;
 		this.funcName = funName;
+		this.saveFuncName = saveFunName;
 		this.envPath = envPath;
 
 		if (properties == null) {
@@ -103,6 +112,13 @@ public class MLConfig implements Serializable {
 	 */
 	public String getFuncName() {
 		return funcName;
+	}
+
+	/**
+	 * @return machine learning script snapshot state function.
+	 */
+	public String getSaveFuncName() {
+		return saveFuncName;
 	}
 
 	/**
@@ -157,7 +173,9 @@ public class MLConfig implements Serializable {
 		HashMap<String, String> destProperties = new HashMap<>(this.properties);
 		HashMap<String, Integer> roleParallelismMap = new HashMap<>(this.roleParallelismMap);
 		return new MLConfig(roleParallelismMap, destProperties, pyFiles,
-				String.copyValueOf(this.funcName.toCharArray()), this.envPath);
+				String.copyValueOf(this.funcName.toCharArray()),
+				String.copyValueOf(this.saveFuncName.toCharArray()),
+				this.envPath);
 	}
 
 	public Map<String, Integer> getRoleParallelismMap() {
@@ -174,6 +192,7 @@ public class MLConfig implements Serializable {
 				"envPath='" + envPath + '\'' +
 				", pythonFiles=" + Arrays.toString(pythonFiles) +
 				", funcName='" + funcName + '\'' +
+				", saveFuncName='" + saveFuncName + '\'' +
 				", roleParallelismMap=" + roleParallelismMap.toString() +
 				", properties=" + properties +
 				'}';
@@ -196,4 +215,13 @@ public class MLConfig implements Serializable {
 	public void setFuncName(String funcName) {
 		this.funcName = funcName;
 	}
+
+	/**
+	 * machine learning script snapshot state function setter.
+	 * @param saveFuncName  main function name.
+	 */
+	public void setSaveFuncName(String saveFuncName) {
+		this.saveFuncName = saveFuncName;
+	}
+
 }

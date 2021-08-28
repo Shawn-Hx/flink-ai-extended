@@ -11,7 +11,6 @@ import com.alibaba.flink.ml.proto.NodeRestartResponse;
 import com.alibaba.flink.ml.proto.NodeServiceGrpc;
 import com.alibaba.flink.ml.proto.NodeSimpleRequest;
 import com.alibaba.flink.ml.proto.NodeSimpleResponse;
-import com.alibaba.flink.ml.proto.NodeSpec;
 import com.alibaba.flink.ml.proto.NodeSpecRequest;
 import com.alibaba.flink.ml.proto.NodeSpecResponse;
 import com.alibaba.flink.ml.proto.NodeStopRequest;
@@ -22,7 +21,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.function.Supplier;
 
 /**
  * machine learning cluster node service.

@@ -56,7 +56,18 @@ public abstract class TFConfigBase implements Serializable {
 	public TFConfigBase(int workerNum, int psNum, Map<String, String> properties, String pythonFile,
 						String funName, String envPath) {
 		this(workerNum, psNum, properties, StringUtils.isEmpty(pythonFile) ? null : new String[] { pythonFile },
-				funName, envPath);
+				funName, null, envPath);
+	}
+
+	public TFConfigBase(int workerNum, int psNum, Map<String, String> properties, String[] pythonFile,
+						String funName, String envPath) {
+		this(workerNum, psNum, properties, pythonFile, funName, null, envPath);
+	}
+
+	public TFConfigBase(int workerNum, int psNum, Map<String, String> properties, String pythonFile,
+						String funName, String saveFunName, String envPath) {
+		this(workerNum, psNum, properties, StringUtils.isEmpty(pythonFile) ? null : new String[] { pythonFile },
+				funName, saveFunName, envPath);
 	}
 
 	/**
@@ -67,15 +78,16 @@ public abstract class TFConfigBase implements Serializable {
 	 * @param properties TF properties
 	 * @param pythonFiles the python files, the first one will be the entry python file
 	 * @param funName the entry function name in the first python file
+	 * @param saveFunName the snapshot state entry function in the first python file
 	 */
 	public TFConfigBase(int workerNum, int psNum, Map<String, String> properties, String[] pythonFiles,
-						String funName, String envPath) {
+						String funName, String saveFunName, String envPath) {
 		Preconditions.checkArgument(workerNum >= 0);
 		Preconditions.checkArgument(psNum >= 0);
 		Map<String, Integer> jobNum = new HashMap<>();
 		jobNum.put(new WorkerRole().name(), workerNum);
 		jobNum.put(new PsRole().name(), psNum);
-		this.mlConfig = new MLConfig(jobNum, properties, pythonFiles, funName, envPath);
+		this.mlConfig = new MLConfig(jobNum, properties, pythonFiles, funName, saveFunName, envPath);
 		if (!this.getMlConfig().getProperties().containsKey(MLConstants.JOB_VERSION)) {
 			this.getMlConfig().getProperties().put(MLConstants.JOB_VERSION, String.valueOf(System.currentTimeMillis()));
 		}
@@ -131,6 +143,14 @@ public abstract class TFConfigBase implements Serializable {
 	 */
 	public String getFuncName() {
 		return mlConfig.getFuncName();
+	}
+
+	/**
+	 * python script save entry function getter.
+	 * @return python script save entry function name.
+	 */
+	public String getSaveFuncName() {
+		return mlConfig.getSaveFuncName();
 	}
 
 	/**
@@ -197,6 +217,7 @@ public abstract class TFConfigBase implements Serializable {
 				"envPath='" + getEnvPath() + '\'' +
 				", pythonFiles=" + Arrays.toString(getPythonFiles()) +
 				", funcName='" + getFuncName() + '\'' +
+				", saveFuncName='" + getSaveFuncName() + '\'' +
 				", workerNum=" + getWorkerNum() +
 				", psNum=" + getPsNum() +
 				", properties=" + getMlConfig().getProperties() +
